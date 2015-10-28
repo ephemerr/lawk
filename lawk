@@ -1,0 +1,86 @@
+#!/usr/bin/lua
+
+FS = "%s"           -- field separator - lua regexp chars or classes
+RS = "\n"           -- record separator - string
+SCRIPT = arg[1]     -- script file or string 
+DATA = arg[2]       -- data file name
+ARGS = arg[3]       -- args for script
+--local FNR = 0
+NR = 0              -- number of records
+--NF = 0              -- current number of fields - it equals to #F
+R = ""              -- current record
+F = {}              -- current fields array
+RT = ""             -- current record separator value 
+
+-- specify script function
+if os.execute("test -e " .. SCRIPT) == 0 then 
+    -- script from file
+    scriptfile = assert(io.open(SCRIPT, "r"))
+    scriptbuf = scriptfile:read("*all")
+else
+    -- script from arg line
+    scriptbuf = "if " .. SCRIPT .. " then print(R) end"
+end
+-- load script 
+local doscript = assert(loadstring(scriptbuf)) 
+
+-- specify data source
+if DATA and os.execute("test -e " .. DATA) == 0 then 
+    assert(io.input(DATA, "r"))
+end
+
+-- BEGIN processing
+BEGIN = true
+doscript()
+BEGIN = false
+
+-- specify record extraction function
+if RS == "\n" then 
+    nextrecord = function()
+        R = io.read("*line")
+        -- clear from '\r'
+        if R then R = string.gsub(R,'\r','') end
+        return R
+    end
+else
+    local filebuf = io.read("*all")
+    local flen = filebuf:len()+1
+    local dstart,dend = 0,0
+    nextrecord = function()
+        -- check finish
+        if dstart == flen then return nil end
+        -- save separator
+        oldstart,oldend=dstart,dend
+        -- next separator
+        dstart,dend = filebuf:find(RS, dend+1)
+        if not dstart then dend,dstart = flen,flen end
+        -- cutout record
+        R = filebuf:sub(oldend+1, dstart-1)
+        RT = filebuf:sub(dstart, dend)
+        return R
+    end
+end
+
+-- record by record processing
+local token = "[^"..FS.."]+"
+while nextrecord() do
+    NR = NR + 1    
+    F = {}
+    local f
+    for f in string.gmatch(R, token) do
+        F[#F + 1] = f
+    end
+    if #F then
+        doscript()
+    end
+end     
+
+-- clear data
+R=""
+F={}
+
+-- END processing
+END = true
+doscript()
+END = false
+
